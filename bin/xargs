@@ -41,7 +41,7 @@ USAGE
 
 for my $opt (qw( l n s )) {
     next unless (defined $o{$opt});
-    if (!length($o{$opt}) || $o{$opt} =~ m/\D/) {
+    if (!length($o{$opt}) || $o{$opt} =~ m/[^0-9]/) {
 	warn "$Program: option $opt: invalid number '$o{$opt}'\n";
 	exit EX_FAILURE;
     }
