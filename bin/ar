@@ -1,5 +1,6 @@
 #!/usr/bin/perl
 
+
 =begin metadata
 
 Name: ar
@@ -11,20 +12,24 @@ License: perl
 
 =cut
 
+use strict;
+
 use POSIX qw(strftime);
 use File::Basename;
 use FileHandle;
 use Getopt::Std qw(getopts);
 
+use vars qw($opt_d $opt_m $opt_p $opt_q $opt_r $opt_t $opt_x $opt_a $opt_b
+  $opt_c $opt_i $opt_o $opt_u $opt_v);
+
 # allow the first arg to not have a '-'.
-if ($ARGV[0] !~ /^\-/) { $ARGV[0] = '-' . $ARGV[0]; }
+if (@ARGV && $ARGV[0] !~ /^\-/) { $ARGV[0] = '-' . $ARGV[0]; }
 
 getopts('dmpqrtxabciouv') or usage();
 
 # take only one of the following major opts
-if (($opt_d + $opt_m + $opt_p + $opt_q + $opt_r + $opt_t + $opt_x) != 1) {
-    usage();
-}
+my @Mj = grep { defined } qw($opt_d $opt_m $opt_p $opt_q $opt_r $opt_t $opt_x);
+usage() if (scalar(@Mj) != 1);
 
 # -i is the same as -b
 $opt_b |= $opt_i;
