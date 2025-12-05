@@ -2,159 +2,733 @@
 
 =begin metadata
 
-Name: ln
-Description: create links
-Author: Abigail, perlpowertools@abigail.be
+Name: ls
+Description: list file/directory information
+Author: Mark Leighton Fisher, fisherm@tce.com
 License: perl
 
 =end metadata
 
 =cut
 
+package PerlPowerTools::ls;
+
 use strict;
 
+use Config qw(%Config);
 use File::Basename qw(basename);
-use Getopt::Std qw(getopts);
+use File::Spec;
+use File::Spec::Functions;
+use File::stat;
 
-use constant EX_SUCCESS => 0;
-use constant EX_FAILURE => 1;
+use constant EX_SUCCESS         => 0;
+use constant EX_FAILURE         => 1;
+use constant SIX_MONTHS_SECONDS => 60*60*24*(365/2);
+use constant PROGRAM            => 'ls';
 
-our $VERSION = '1.3';
-my $Program = basename($0);
+__PACKAGE__->run(@ARGV) unless caller;
 
-getopts('sf', \my %options) or usage();
-usage() unless @ARGV;
+sub get_columns {
+	my $class = shift;
+	my @methods = qw(windows unix default);
+	foreach my $m ( @methods ) {
+		my $cols = $class->can($m)->();
+		next unless defined $cols;
+		return $cols;
+		}
 
-my $target = pop @ARGV;
-if (scalar(@ARGV) == 0 && -d $target) {
-    warn "$Program: '$target': cannot overwrite directory\n";
-    exit EX_FAILURE;
-}
+	$class->default;
+	}
 
-# Deal with the force option in that case of a "file" target.
-unless (-d $target) {
-    if (exists $options{'f'} && -e $target) {
-        unless (unlink $target) {
-            warn "$Program: cannot unlink '$target': $!\n";
-            exit EX_FAILURE;
-        }
-    }
-}
+sub windows {
+	return unless $^O eq 'MSWin32';
+	my @lines = `powershell -command "&{(get-host).ui.rawui.WindowSize;}"`;
 
-my $rc = EX_SUCCESS;
-foreach my $file (@ARGV) {
-    my $this_target;
-    if (-d $target) {
-        require File::Spec;
-        my $this_file = basename($file);
-        $this_target  = File::Spec->catfile($target, $this_file);
-        # Deal with the force option.
-        if (exists $options{'f'} && -e $this_target) {
-            unless (unlink $this_target) {
-                warn "$Program: cannot unlink '$this_target': $!\n";
-                $rc = EX_FAILURE;
-                next;
-            }
-        }
-    }
-    else {
-        $this_target = $target;
-    }
+	while( my $l = shift @lines ) { last if $l =~ /\A-----/ }
+	return $lines[0] =~ m/\A\s*(\d+)/ ? $1 : ();
+	}
 
-    unless (dolink($file, $this_target)) {
-        warn "$Program: failed to link '$file' to '$this_target': $!\n";
-        $rc = EX_FAILURE;
-    }
-}
-unless (@ARGV) {
-    my $newfile = basename($target);
-    unless (dolink($target, $newfile)) {
-        warn "$Program: failed to link '$target' to '$newfile': $!\n";
-        $rc = EX_FAILURE;
-    }
-}
-exit $rc;
+sub unix {
+	return if $^O eq 'MSWin32';
+	my $c = do {
+		if( has('tput') ) { `tput cols` }
+		elsif( has('ssty') ) { `stty size  | cut -d' ' -f 2` }
+		else { undef };
+		};
+	chomp $c;
+	return $c;
+	}
 
-sub VERSION_MESSAGE {
-    print "$Program version $VERSION\n";
-    exit EX_SUCCESS;
-}
+sub default { 80 }
 
-sub usage {
-    warn "usage: $Program [-sf] source_file [target_file | [source_files ...] target_directory]\n";
-    exit EX_FAILURE;
-}
+sub has {
+	my $program = shift;
+	foreach my $dir ( split /\Q$Config{path_sep}/, $ENV{PATH} ) {
+		next unless -x catfile( $dir, $program );
+		return 1;
+		}
+	return;
+	}
 
-sub dolink {
-    my ($file, $target) = @_;
-    return symlink($file, $target) if $options{'s'};
-    return link($file, $target);
-}
+BEGIN {
+	my @perms = qw(--- --x -w- -wx r-- r-x rw- rwx);
+	my @ftype = ( '', qw(p c ? d ? b ? - ? l ? s ? ? ?) );
 
-__END__
+	sub format_mode {
+		my( $class, $mode, %opts ) = @_;
+
+		my $setids   = ($mode & 07000)>>9;
+		my @permstrs = @perms[($mode&0700)>>6, ($mode&0070)>>3, $mode&0007];
+		my $ftype    = $ftype[($mode & 0170000)>>12];
+
+		if ($setids) {
+			if ($setids & 01) {		# Sticky bit
+				$permstrs[2] =~ s/([-x])$/$1 eq 'x' ? 't' : 'T'/e;
+				}
+			if ($setids & 04) {		# Setuid bit
+				$permstrs[0] =~ s/([-x])$/$1 eq 'x' ? 's' : 'S'/e;
+				}
+			if ($setids & 02) {		# Setgid bit
+				$permstrs[1] =~ s/([-x])$/$1 eq 'x' ? 's' : 'S'/e;
+				}
+			}
+
+		join '', $ftype, @permstrs;
+		}
+	} # BEGIN
+
+sub VERSION { '0.72' };
+
+sub DirEntries {
+	my( $class, $Options, $file ) = @_;
+
+	my %Attributes = ();
+	my @Entries    = ();
+
+	if( exists $Options->{'d'} || ! -d $file ) {
+		if (-l $file or -e $file) {
+			push @Entries, $file;
+			$Attributes{$file} = -l $file ? lstat($file) : stat($file);
+			push @Entries, \%Attributes;
+			return @Entries;
+			}
+		$class->my_warn( "can't access '$file': $!" );
+		return;
+		}
+
+	my $dh;
+	unless( opendir $dh, $file ) {
+		$class->my_warn( "failed to open directory '$file': $!" );
+		return;
+		}
+
+	my $Name = "";
+	while( $Name = readdir($dh) ) {
+		next if (! exists $Options->{'a'} && $Name =~ m/^\./o);
+		push @Entries, $Name;
+		my $path = File::Spec->catfile( $file, $Name );
+		$Attributes{$Name} = -l $path ? lstat($path) : stat($path);
+		}
+	closedir($dh);
+
+	# ------ return list with %Attributes ref at end
+	push(@Entries, \%Attributes);
+	return @Entries;
+	}
+
+BEGIN { # EntryFormat
+	my @Month = (
+		"Jan",
+		"Feb",
+		"Mar",
+		"Apr",
+		"May",
+		"Jun",
+		"Jul",
+		"Aug",
+		"Sep",
+		"Oct",
+		"Nov",
+		"Dec"
+	);
+
+	sub EntryFormat {
+		my( $class, $Options, $Attributes, $Dirname, $Entry ) = @_;
+
+		my $max_file_size_length = do {
+			my( $max ) =
+				sort { $b <=> $a }
+				map { $Attributes->{$_}->size }
+				keys %$Attributes;
+
+			length $max;
+			};
+
+		my $BlockSize =	exists($Options->{'k'}) ? 2 : 1;	# block size in 512-byte units
+
+		if( exists $Options->{'i'} ) {
+			if( defined $Attributes->{$Entry} ) {
+				$class->output( sprintf "%10d ", $Attributes->{$Entry}->ino );
+				}
+			else {
+				$class->output( "_________ " );
+				}
+			}
+
+		if( exists $Options->{'s'} ) {
+			if( defined $Attributes->{$Entry} ) {
+				my $Blocks = $Attributes->{$Entry}->blocks;
+				$Blocks = 0 if $Blocks eq '';
+				$class->output( sprintf "%4d ",  $Blocks / $BlockSize + (($Blocks % $BlockSize) > 0) );
+				}
+			else {
+				$class->output( "____ " );
+				}
+			}
+
+		if( ! exists $Options->{'l'} ) {
+			$class->output( "$Entry\n" );
+			}
+		else {
+			if( ! defined $Attributes->{$Entry} ) {
+				$class->output( <<'UNDEFSTAT' );
+__________ ___ ________ ________ ________ ___ __  _____
+UNDEFSTAT
+				}
+			else {
+				my $mode = $class->format_mode($Attributes->{$Entry}->mode);
+				$class->output( "$mode " );
+				$class->output( sprintf "%3d ", $Attributes->{$Entry}->nlink );
+
+				my $max_uid_length = 8;
+				if( exists $Options->{'n'} ) {
+					$class->output( sprintf '%-*2$8d ', $Attributes->{$Entry}->uid, $max_uid_length );
+					}
+				else {
+					my $uid = $class->Getpwuid($Attributes->{$Entry}->uid);
+					if( defined $uid ) {
+						$class->output( sprintf '%-*2$s ', $uid, $max_uid_length );
+						}
+					else {
+						$class->output( sprintf'%-*2$d ', $Attributes->{$Entry}->uid, $max_uid_length );
+						}
+					}
+
+				my $max_gid_length = 8;
+				if( exists $Options->{'n'} ) {
+					$class->output( sprintf '%-*2$d ', $Attributes->{$Entry}->gid, $max_gid_length );
+					}
+				else {
+					my $gid = $class->Getgrgid($Attributes->{$Entry}->gid);
+					my $max_gid_length = 8;
+					if( defined $gid ) {
+						$class->output( sprintf '%-*2$s ', $gid, $max_gid_length );
+						}
+					else {
+						$class->output( sprintf '%-*2$d ', $Attributes->{$Entry}->gid, $max_gid_length );
+						}
+					}
+
+				my $size_width = 9;
+				if( $Attributes->{$Entry}->mode & 0140000 ) {
+					$class->output( sprintf '%*2$d ', $Attributes->{$Entry}->size, $max_file_size_length );
+					}
+				else {
+					$class->output( sprintf "%4x,%4x ",
+						(($Attributes->{$Entry}->dev & 0xFFFF000) > 16),
+						$Attributes->{$Entry}->dev & 0xFFFF
+						);
+					}
+
+				my $time = $Attributes->{$Entry}->mtime;
+				$time = $Attributes->{$Entry}->ctime if exists $Options->{'c'};
+				$time = $Attributes->{$Entry}->atime if exists $Options->{'u'};
+
+				my($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) = localtime($time);
+				$class->output( $Month[$mon] );
+				$class->output( sprintf " %2d ", $mday );
+
+				if( start_time() - $time <= SIX_MONTHS_SECONDS ) {
+					$class->output( sprintf "%02d:%02d", $hour, $min );
+					}
+				else {
+					$class->output( sprintf " %04d", $year + 1900 );
+					}
+				}
+			}
+
+		my $path = File::Spec->catfile($Dirname, $Entry);
+		if( -l $path ) {
+			my $target = readlink( $path );
+			$Entry .= " -> $target";
+			}
+		$class->output( " $Entry\n" );
+		}
+	}
+
+sub List {
+	my $Attributes = pop(@_);
+	my( $class, $dir_name, $Options, $is_dir, $Expand, @files ) = @_;
+
+	# ------ precompute max entry length and total size
+	my $total_blocks = 0;
+	my $max_file_length = 0;
+	foreach my $file (@files) {
+		$total_blocks +=
+			(!defined($Attributes->{$file}) || ($Attributes->{$file}->blocks eq '')) ? 0 : $Attributes->{$file}->blocks;
+		my $l = length $file;
+		$max_file_length = $l if $l > $max_file_length;
+		}
+	$max_file_length += 1;	# account for spaces
+
+	if( $is_dir ) {
+		$class->output( "$dir_name:\n" ) if exists $Options->{'R'};
+		$class->output( "total $total_blocks\n" ) if grep { defined $Options->{$_} } qw(s i);
+		}
+
+	my @SortedEntries = $class->Order($Options, $Attributes, @files);
+
+	# ------ user requested 1 entry/line, long, size, or inode
+	if( grep { defined $Options->{$_} } qw(1 l s i) ) {
+		for my $entry (@SortedEntries) {
+			$class->EntryFormat( $Options, $Attributes, $dir_name, $entry );
+			}
+		}
+	# ------ multi-column output
+	else {
+		# ------ compute rows, columns, width mask
+		$Options->{'w'} = $class->get_columns() unless defined $Options->{'w'};
+		my $Cols    = (int($Options->{'w'} / $max_file_length)) || 1;
+		my $Rows    = int(($#_+$Cols) / $Cols);
+		my $template = sprintf "%%-%ds ", $max_file_length;
+
+		my $elt;
+		for ($elt = 0; $elt < $Rows * $Cols; $elt++) {
+			my $target = ($elt % $Cols) * $Rows + int(($elt / $Cols));
+			my $piece = sprintf $template, $target < ($#SortedEntries + 1) ? $SortedEntries[$target] : "";
+			# don't blank pad to eol of line
+			$piece =~ s/\s+$// if (($elt+1) % $Cols == 0);
+			$class->output( $piece );
+			$class->output( "\n" ) if (($elt+1) % $Cols == 0);
+			}
+		$class->output( "\n" ) if (($elt+1) % $Cols == 0);
+		}
+
+	# ------ print blank line if -R
+	$class->output( "\n" ) if exists $Options->{'R'};
+
+	# ------ list subdirectories of this directory
+	if( !exists($Options->{'d'}) && ($Expand || exists $Options->{'R'} )) {
+		for my $entry ($class->Order($Options, $Attributes, @files)) {
+			next if ($entry eq "." || $entry eq "..");
+			if (defined($Attributes->{$entry}) && $Attributes->{$entry}->mode & 0040000) {
+				my $path = File::Spec->canonpath(File::Spec->catdir($dir_name,$entry));
+				my @dirs = $class->DirEntries($Options, $path);
+				$class->List($path, $Options, 1, 0, @dirs);
+				}
+			}
+		}
+	}
+
+# ------ sort file list based on %Options
+sub Order {
+	my( $class, $Options, $A, @Entries ) = @_;
+
+	# ------ sort by size, largest first
+	if( exists $Options->{'S'} ) {
+		if( exists $Options->{'r'} ) {
+			@Entries = sort { $A->{$a}->size <=> $A->{$b}->size } @Entries;
+			}
+		else {
+			@Entries = sort { $A->{$b}->size <=> $A->{$a}->size } @Entries;
+			}
+		}
+	# ------ sort by time, most recent first
+	elsif( grep { exists $Options->{$_} } qw(t c u) ) {
+		if( exists $Options->{'r'} ) {
+			if( exists $Options->{'u'} ) {
+				@Entries = sort { $A->{$a}->atime <=> $A->{$b}->atime } @Entries;
+				}
+			elsif( exists $Options->{'c'} ) {
+				@Entries = sort { $A->{$a}->ctime <=> $A->{$b}->ctime } @Entries;
+				}
+			else {
+				@Entries = sort { $A->{$a}->mtime <=> $A->{$b}->mtime } @Entries;
+				}
+			}
+		else {
+			if( exists $Options->{'u'} ) {
+				@Entries = sort { $A->{$b}->atime <=> $A->{$a}->atime } @Entries;
+				}
+			elsif( exists $Options->{'c'} ) {
+				@Entries = sort { $A->{$b}->ctime <=> $A->{$a}->ctime } @Entries;
+				}
+			else {
+				@Entries = sort { $A->{$b}->mtime <=> $A->{$a}->mtime } @Entries;
+				}
+			}
+	# ------ sort by name
+		}
+	elsif( ! exists $Options->{'f'} ) {
+		if( exists $Options->{'r'} ) {
+			@Entries = sort { $b cmp $a } @Entries;
+			}
+		else {
+			@Entries = sort { $a cmp $b } @Entries;
+			}
+		}
+
+	return @Entries;
+	}
+
+sub Getgrgid { getgrgid($_[1]) }
+sub Getpwuid { getpwuid($_[1]) }
+
+BEGIN {
+	my $NO_GETGRGID = ! eval { my $dummy = ""; $dummy = (getpwuid(0))[0] };
+
+	if( $NO_GETGRGID ) {
+		no warnings qw(redefine);
+		no strict qw(refs);
+		*{'Getgrgid'} = sub { ($_[1], 0) };
+		*{'Getpwuid'} = sub { ($_[1], 0) };
+		}
+	}
+
+sub my_exit {
+	my( $class, $code ) = @_;
+	CORE::exit $code;
+	}
+
+sub warn_fh { \*STDERR }
+sub my_warn {
+	my( $class, $message, $prepend ) = @_;
+	$prepend = 1 unless defined $prepend;
+	$message = PROGRAM . ": " . $message if $prepend;
+	$message .= "\n";
+	print { $class->warn_fh } $message;
+	}
+
+sub output_fh { \*STDOUT }
+sub output {
+	my( $class, @messages ) = @_;
+	print { $class->output_fh } @messages;
+	}
+
+sub _opts_string {
+	#  macOS only                          *                  *
+	#                  1ABCFGHILOPRSTUWabcdefghiklmnopqrstuvwxy%
+	my $opts_string = '1A CF   L  RST Wa cd fg iklmnopqrstu wx';
+	$opts_string =~ s/\s+//g;
+	$opts_string;
+	}
+
+sub process_options {
+	require Getopt::Std;
+
+	my( $class, @args ) = @_;
+
+	my $Options = {};
+
+	my $Supported = $class->_supported_options;
+
+	my %original_positions;
+	foreach my $i ( 0 .. $#args ) {
+		my $arg = $args[$i];
+		last unless $arg =~ /\A-/;
+		last if $arg eq '--';
+		( my $letter = $arg ) =~ s/\A--?//;
+		$original_positions{$letter} = $i;
+		}
+
+	return $class->VERSION_MESSAGE if exists $original_positions{'version'};
+	return $class->usage(
+		-verbose => 2,
+		-output  => $class->error_fh,
+		) if exists $original_positions{'help'};
+
+	my $opts_string = $class->_opts_string;
+
+	local $Getopt::Std::STANDARD_HELP_VERSION = 1;
+
+	local @ARGV = @args;
+	unless( Getopt::Std::getopts($opts_string, $Options) ) {
+		$class->my_warn( "usage: " . PROGRAM . " [-$opts_string] [file ...]", 0 );
+		$class->my_exit( EX_FAILURE );
+		}
+	@args = @ARGV;
+
+	my %Defaults = ( w => $class->get_columns );
+
+	foreach my $key ( keys %Defaults ) {
+		next if defined $Options->{$key};
+		$Options->{$key} = $Defaults{$key};
+		}
+
+	$Options->{'a'} = 1 if $Options->{'f'};
+
+	unless( -t *STDOUT ) {
+		$Options->{'1'} = 1 unless -t *STDOUT;
+		}
+
+	delete $Options->{'w'} if( defined $Options->{'w'} and  $Options->{'w'} == 0 );
 
 =pod
 
+The -1, -C, -x, and -l options all override each other; the last
+one specified determines the format used.
+
+The -c, -u, and -U options all override each other; the last one
+specified determines the file time used.
+
+The -S and -t options override each other; the last one specified
+determines the sort order used.
+
+The -B, -b, -w, and -q options all override each other; the last
+one specified determines the format used for non-printable
+characters.
+
+The -H, -L and -P options all override each other (either
+partially or fully); they are applied in the order specified.
+
+=cut
+
+	my @overrides = (
+		[ qw(1 C x l) ],
+		[ qw(c u U) ],   # -U not supported
+		[ qw(S t) ],
+		# [ qw(B b w q) ], # -B -b -w not supported
+		# [ qw(H L P) ],   # -H -P not supported
+		);
+
+	@overrides = map {
+		my @opts = @$_;
+		[ grep { exists $Supported->{$_} } @opts ],
+		} @overrides;
+
+	foreach my $row ( @overrides ) {
+		my @order =
+			sort { $original_positions{$a} <=> $original_positions{$b} }
+			grep { exists $Options->{$_} }
+			@$row;
+		my $last = $order[-1];
+
+		foreach my $opt ( @$row ) {
+			next if $opt eq $last;
+			delete $Options->{$opt};
+			}
+		}
+
+	return ($Options, @args);
+	}
+
+sub run {
+	{
+	no strict 'refs';
+	*{"start_time"} = do { my $time = time; sub { $time } };
+	}
+
+	my( $class, @args ) = @_;
+
+	my( $Options, @args ) = $class->process_options(@args);
+	@args = qw(.) unless @args; # current directory if nothing else
+
+	my $ArgCount = -1;  # file/directory argument count
+	my %Attributes;     # File::stat directory entry attributes
+	my @Dirs;           # directories in ARGV
+	my @Files;          # non-directories in ARGV
+	my $First = 1;      # first directory entry on command line
+
+	for my $Arg (@args) {
+		$ArgCount++;
+		$Attributes{$Arg} = -l $Arg ? lstat($Arg) : stat($Arg);
+		my $ref = ( -d $Arg and ! exists $Options->{'d'} ) ? \@Dirs : \@Files;
+		push @$ref, $Arg;
+		}
+
+	if (@Files) {
+		$First = 0;
+		my %attrs;
+		my @okfiles;
+		foreach (@Files) {
+			my @ret = $class->DirEntries($Options, $_);
+			next unless @ret; # stat() failed
+			%attrs = (%attrs, %{ $ret[-1] });
+			push @okfiles, $_;
+			}
+		my @sorted = $class->Order($Options, \%Attributes, @okfiles);
+		$class->List('.', $Options, 0, 0, @sorted, \%attrs);
+		}
+
+	for my $Arg ($class->Order($Options, \%Attributes, @Dirs)) {
+		if( ! exists $Options->{'R'} ) {
+			$class->output( "\n" ) unless $First;
+			$First = 0;
+			$class->output( "$Arg:\n" ) if $ArgCount > 0;
+			}
+		$class->List($Arg, $Options, 1, 0, $class->DirEntries($Options, $Arg));
+		}
+	}
+
+sub start_time;
+
+sub _supported_options {
+	my $class = shift;
+	my $opts_string = $class->_opts_string;
+	$opts_string =~ s/\s+//g;
+	my %Supported = map { $_, 1 } split //, $opts_string;
+	return \%Supported;
+	};
+
+sub usage {
+	my $class = shift;
+	require Pod::Usage;
+	Pod::Usage::pod2usage(
+		-verbose => 2,
+		-output  => $class->error_fh,
+		);
+	$class->my_exit( EX_SUCCESS );
+	}
+
+sub VERSION_MESSAGE {
+	my $class = shift;
+    $class->output( PROGRAM . " version " . $class->VERSION . " (Perl Power Tools, Perl $^V)\n" );
+    $class->my_exit( EX_SUCCESS );
+}
+
+__PACKAGE__;
+
+=pod
+
+=encoding utf8
+
 =head1 NAME
 
-ln - create links
+ls - list file/directory information
 
 =head1 SYNOPSIS
 
-B<ln> [B<-sf>] I<source_file> [I<target_file> | [I<source_files> ... I<target_directory>]]
+ls [-1ACFLRSTWacdfgiklmnopqrstux] [file ...]
 
 =head1 DESCRIPTION
 
-B<ln> creates I<hard> or I<symbolic links> between files. If more than one
-argument is given, and the last argument is a directory, links will be
-created in this directory; their names will consist of the last components
-of the I<source files>. If only one argument is given, the link will be
-created in the current directory, and its name will consist of the last
-component of the I<source file>.
+This program lists information about files and directories. If it is
+invoked without file/directory name arguments, it lists the contents
+of the current directory. Otherwise, B<ls> lists information about the
+files and information about the contents of the directories (but see
+B<-d>).  Furthermore, without any option arguments B<ls> just lists
+the names of files and directories. All files are listed before all
+directories. The default sort order is ascending ASCII on filename.
 
 =head2 OPTIONS
 
-B<ln> accepts the following options:
+The BSD options C<1ACFLRSTWacdfgiklmnopqrstux> are recognized, but
+only C<1RSacdfiklnrstu> are implemented:
 
 =over 4
 
-=item B<-s>
+=item -1
 
-Create symbolic links (hard links are created by default)
+List entries 1 per line (default if output is not a tty). This is
+disabled by any of C<-C>, C<-x>, or C<-l>.
 
-=item B<-f>
+=item -R
 
-If the I<target> is not a directory, try to remove any existing
-I<target>s before creating the links. Failure of removing the
-target results in a warning and no further attempt to make the
-link will be made.
+Recursively list the contents of all directories, breadth-first.
+
+=item -S
+
+Sort descending by size. This is disabled by C<-t>.
+
+=item -a
+
+List all files (normally files starting with '.' are ignored).
+
+=item -c
+
+Sort by descending last modification time of inode. This is
+disabled by any of C<-u> or C<-U>.
+
+=item -d
+
+Do not list directory contents.
+
+=item -f
+
+Do not sort -- list in whatever order files/directories are returned
+by the directory read function. This option implies -a.
+
+=item -i
+
+List file inode number.  (Doesn't mean much on non-inode systems.)
+
+=item -k
+
+When used with B<-s>, list file/directory size in 1024-byte blocks.
+
+=item -l
+
+Long format listing of mode -- # of links, owner name, group name,
+size in bytes, time of last modification, and name.
+
+=item -n
+
+List numeric uid and gid (default on platforms without getpwuid()).
+
+=item -r
+
+Reverse sorting order.
+
+=item -s
+
+List file/directory size in 512-byte blocks.  (May not mean much
+on non-Unix systems.)
+
+=item -t
+
+Sort by descending last modification time.
+
+=item -u
+
+Sort by descending last access time.
+
+=item -w
+
+Set the column width for the output. The default is the window size,
+or 80 if the program cannot determine the window size. A column
+width of 0 means unlimited.
 
 =back
 
 =head1 ENVIRONMENT
 
-The working of B<ln> is not influenced by any environment variables.
-
-=head1 PORTABILITY
-
-B<ln> will not do much on platforms that do not know the concept of
-links. B<ln -s> will not do much on platforms that do know symbolic links.
+The working of I<ls> is not influenced by any environment variables.
 
 =head1 BUGS
 
-There are no known bugs in this implementation of B<ln>.
+The file metadata from C<stat> is used, which may not necessarily mean
+much on non-Unix systems. Specifically, the uid, gid, inode, and
+block numbers may be meaningless (or less than meaningful at least).
+
+The C<-l> option does not yet list the major and minor device numbers
+for special files, but it does list the value of the 'dev' field as 2
+hex 16-bit words. Doing this properly would probably require
+filesystem type probing.
 
 =head1 AUTHOR
 
-The Perl implementation of B<ln> was written by Abigail, I<perlpowertools@abigail.be>.
+This Perl implementation of I<ls> was written by Mark Leighton Fisher
+of Thomson Consumer Electronics, I<fisherm@tce.com>.
+
+Portions of Stat::lsmode from Mark Jason Dominus have been inlined
+into this program uder the perl license. See L<http://www.plover.com/~mjd/perl/lsMode/>.
 
 =head1 COPYRIGHT and LICENSE
 
-This program is copyright by Abigail 1999.
-
-This program is free and open software. You may use, copy, modify, distribute,
-and sell this program (and any modified variants) in any way you wish,
-provided you do not restrict others from doing the same.
+This program is free and open software. You may use, modify,
+distribute, and sell this program (and any modified variants) in any
+way you wish, provided you do not restrict others from doing the same.
 
 =cut
+
 
