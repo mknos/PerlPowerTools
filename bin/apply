@@ -21,9 +21,9 @@ use constant EX_SUCCESS => 0;
 use constant EX_FAILURE => 1;
 
 my $Program = basename($0);
-my ($VERSION) = '1.5';
+my ($VERSION) = '1.6';
 
-my $argc  = 1;
+my $argc;
 my $debug = 0;
 my $magic = '%';
 
@@ -52,6 +52,10 @@ while (@ARGV) {
         }
     }
     elsif ($ARGV[0] =~ m/\A\-(\d+)\Z/) {
+        if (defined $argc) {
+            warn "$Program: option -# specified more than once\n";
+            usage();
+        }
         $argc = $1;
     }
     elsif ($ARGV[0] eq '-d') {
@@ -64,6 +68,7 @@ while (@ARGV) {
     shift;
 }
 
+$argc = 1 unless defined $argc;
 my $command = shift;
 usage() unless @ARGV;
 
