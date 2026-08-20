@@ -658,8 +658,8 @@ exist in the archive.
 
 Replace or add the specified files to the archive.  If the
 archive does not exist a new archive file is created.  Files that
-replace existing files do not change the order of the files with-
-in the archive.  New files are appended to the archive unless one
+replace existing files do not change the order of the files
+within the archive.  New files are appended to the archive unless one
 of the options -B<a>, -B<b> or -B<i> is specified.
 
 =item -t
@@ -678,10 +678,10 @@ has a newer modification time than the file on disk.
 
 =item -v
 
-Provide verbose output.  When used with the -B<d>, -B<m>, -B<q> or -B<x> op-
-tions, ar gives a file-by-file description of the archive modifi-
-cation.  This description consists of three, white-space separat-
-ed fields: the option letter, a dash (``-'') and the file name.
+Provide verbose output.  When used with the -B<d>, -B<m>, -B<q> or -B<x>
+options, ar gives a file-by-file description of the archive modification.
+This description consists of three, white-space separated
+fields: the option letter, a dash (``-'') and the file name.
 When used with the -B<r> option, ar displays the description as
 above, but the initial letter is an ``a'' if the file is added to
 the archive and an ``r'' if the file replaces a file already in
@@ -705,9 +705,9 @@ the file modification time (in the date(1) format ``%b %e %H:%M
 
 Extract the specified archive members into the files named by the
 command line arguments.  If no members are specified, all the
-owner and group will be unchanged.  The file access and modifica-
-tion times are the time of the extraction (but see the -B<o> op-
-tion).  The file permissions will be set to those of the file
+owner and group will be unchanged.  The file access and modification
+times are the time of the extraction (but see the -B<o> option).
+The file permissions will be set to those of the file
 when it was entered into the archive; this will fail if the user
 is not the owner of the extracted file or the super-user.
 
