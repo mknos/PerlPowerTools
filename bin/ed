@@ -47,6 +47,7 @@ use strict;
 
 use File::Temp qw();
 use Getopt::Std qw(getopts);
+use List::Util qw(max);
 use Text::ParseWords qw(quotewords);
 
 use constant A_NOMATCH => -1;
@@ -296,12 +297,14 @@ sub VERSION_MESSAGE {
     exit EX_SUCCESS;
 }
 
+sub file_modified {
+    $NeedToSave = 1;
+    $UserHasBeenWarned = 0;
+    return;
+}
+
 sub maxline {
-    my $n = $#lines;
-    if ($n < 0) {
-        $n = 0;
-    }
-    return $n;
+    return max(0, $#lines);
 }
 
 sub getrc {
@@ -456,8 +459,7 @@ sub edJoin {
     my @tmp = splice @lines, $i + 1, $delcount;
     my $buf = join '', @tmp;
     $lines[$i] .= $buf;
-    $NeedToSave = 1;
-    $UserHasBeenWarned = 0;
+    file_modified();
     $CurrentLineNum = $adrs[0];
     return;
 }
@@ -505,9 +507,7 @@ sub edMove {
         $i += $count if $dst < $start; # lines moved up
         splice @lines, $i, $count;
     }
-
-    $NeedToSave = 1;
-    $UserHasBeenWarned = 0;
+    file_modified();
     $CurrentLineNum = $dst + scalar(@copy);
     return;
 }
@@ -568,8 +568,7 @@ sub edSubstitute {
 
         if (eval $evalstring) {
             $LastMatch = $lineno;
-            $NeedToSave = 1;
-            $UserHasBeenWarned = 0;
+            file_modified();
         }
 
     }
@@ -599,8 +598,7 @@ sub edDelete {
     for my $i (reverse @adrs) {
         splice @lines, $i, 1;
     }
-    $NeedToSave = 1;
-    $UserHasBeenWarned = 0;
+    file_modified();
 
     $CurrentLineNum = $adrs[0];
     if ($CurrentLineNum > maxline()) {
@@ -747,8 +745,7 @@ sub edRead {
     splice @lines, $targ + 1, 0, @tmp_lines;
     $CurrentLineNum = $targ + scalar(@tmp_lines);
 
-    $NeedToSave = 1;
-    $UserHasBeenWarned = 0;
+    file_modified();
     return;
 }
 
@@ -877,8 +874,7 @@ sub edInsert {
 
     splice @lines, $src, 0, @tmp_lines;
 
-    $NeedToSave = 1;
-    $UserHasBeenWarned = 0;
+    file_modified();
     return;
 }
 
@@ -919,8 +915,7 @@ sub edUndo {
     @lines = <$UndoFile>;
     chomp @lines;
     unshift @lines, undef;
-    $UserHasBeenWarned = 0;
-    $NeedToSave = 1; # new tmpfile
+    file_modified();
     return;
 }
 
