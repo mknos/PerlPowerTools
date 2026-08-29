@@ -499,7 +499,7 @@ sub readMagicEntry {
         $$MF[1] = $line;
         return length($thisDepth);
     }
-    elsif (@$entry) {
+    elsif (defined $entry && @{ $entry }) {
         # already have an entry.  this is not a continuation.
         # save this line for the next call and exit.
         $$MF[1] = $line;
@@ -636,7 +636,8 @@ sub readMagicLine {
     $testval = $line;
 
     # do octal/hex conversion
-    $testval =~ s/\\([x0-7][0-7]?[0-7]?)/chr(oct($1))/eg;
+    $testval =~ s/\\x([0-9A-Fa-f]{1,2})/chr(hex($1))/eg;
+    $testval =~ s/\\([0-7][0-7]?[0-7]?)/chr(oct($1))/eg;
 
     # do single char escapes
     $testval =~ s/\\(.)/$ESC{$1}||$1/eg;
