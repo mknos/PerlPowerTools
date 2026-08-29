@@ -262,11 +262,7 @@ sub process_options {
 	my $class = shift;
 
 	local @ARGV = @_;
-	{
-	local $SIG{__WARN__} = sub { 1 };
-	Getopt::Std::getopts( 'ap:');
-	}
-
+	Getopt::Std::getopts( 'ap:') or $class->usage();
 	return $ARGV[0];
 	}
 
