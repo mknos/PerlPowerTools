@@ -15,16 +15,17 @@ License: perl
 use strict;
 
 use File::Basename qw(basename);
+use Getopt::Std qw(getopts);
 
 use constant EX_SUCCESS => 0;
 use constant EX_FAILURE => 1;
 
 my $Program = basename($0);
 
-if (grep /\A\-/, @ARGV) {
+getopts('') or do {
 	warn "usage: $Program [file ...]\n";
 	exit EX_FAILURE;
-}
+};
 my $rc = EX_SUCCESS;
 foreach my $file (@ARGV) {
 	next if (-d $file);
