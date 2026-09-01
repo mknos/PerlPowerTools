@@ -58,7 +58,7 @@ my %ESC = (
     b => "\b",
     t => "\t",
     f => "\f",
-    v => "\v"
+    v => chr(0xb),
     );
 
 # from the BSD names.h, some tokens for hard-coded checks of
