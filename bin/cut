@@ -20,8 +20,17 @@ use constant EX_SUCCESS => 0;
 use constant EX_FAILURE => 1;
 
 my $me = basename($0);
-
+my $rc = EX_SUCCESS;
 my %opt;
+
+$SIG{'__WARN__'} = sub {
+    my $msg = shift;
+    $msg =~ s/\n*\z/\n/;
+    print { *STDERR } "$me: $msg";
+    $rc = EX_FAILURE;
+    return;
+};
+
 getopts('b:c:d:f:ns', \%opt) or usage();
 
 # There's no difference between -b and -c on any unix I
@@ -41,7 +50,7 @@ else {
     warn "$me: byte, character or field list required\n";
     usage();
 }
-exit EX_SUCCESS;
+exit $rc;
 
 sub checknum {
     my $n = shift;
