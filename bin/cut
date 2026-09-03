@@ -47,7 +47,7 @@ elsif (defined $opt{'f'}) {
     handle_f($opt{'f'}, $opt{'d'}, $opt{'s'});
 }
 else {
-    warn "$me: byte, character or field list required\n";
+    warn "byte, character or field list required\n";
     usage();
 }
 exit $rc;
@@ -55,11 +55,11 @@ exit $rc;
 sub checknum {
     my $n = shift;
     if ($n !~ m/\A\-?[0-9]+\Z/) {
-        warn "$me: unexpected byte or field number: '$n'\n";
+        warn "unexpected byte or field number: '$n'\n";
         exit EX_FAILURE;
     }
     if ($n == 0) {
-        warn "$me: bytes and fields are numbered from 1\n";
+        warn "bytes and fields are numbered from 1\n";
         exit EX_FAILURE;
     }
 }
@@ -78,18 +78,18 @@ sub parse_fields {
             $to = $3;
         }
         else {
-                warn "$me: invalid byte list: '$item'\n";
+                warn "invalid byte list: '$item'\n";
                 exit EX_FAILURE;
         }
         checknum($from) if length($from);
         checknum($to)   if length($to);
         if (!length($from) && !length($to)) { # reject lone '-'
-            warn "$me: invalid byte list\n";
+            warn "invalid byte list\n";
             exit EX_FAILURE;
         }
         if (length($from) && length($to)) {
             if ($from > $to) {
-                warn "$me: invalid range $from-$to\n";
+                warn "invalid range $from-$to\n";
                 exit EX_FAILURE;
             }
             $is_range = 0 if $from == $to;
