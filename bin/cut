@@ -152,8 +152,8 @@ sub handle_f {
         chomp;
 
         # Only waste time on lines with delimiters
-        if (/$delim/) {
-            my @hunk = split /$delim/;
+        if (m/\Q$delim\E/) {
+            my @hunk = split /\Q$delim\E/;
             my $col = 0;
             my @out;
             foreach my $c (@cols) {
